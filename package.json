@@ -1,0 +1,13 @@
+{
+  "name": "apollo-link-offline",
+  "version": "1.0.0",
+  "description": "An Apollo Link to queue mutations when offline or network errors exist.",
+  "main": "./src/index.js",
+  "author": "Miguel Carvajal <omar@carvajalonline.com>",
+  "license": "MIT",
+  "private": false,
+  "dependencies": {
+    "apollo-link": "^1.2.3",
+    "uuid": "^3.3.2"
+  }
+}
