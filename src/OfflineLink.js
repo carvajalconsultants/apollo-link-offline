@@ -17,8 +17,11 @@ export default class OfflineLink extends ApolloLink {
    * 
    * retryInterval
    * Milliseconds between attempts to retry failed mutations. Defaults to 30,000 milliseconds.
+   * 
+   * sequential
+   * Indicates if the attempts should be retried in order. Defaults to false which retries all failed mutations in parallel.
    */
-  constructor({ storage, retryInterval = 30000 }) {
+  constructor({ storage, retryInterval = 30000, sequential = false }) {
     super();
 
     if (!storage) {
@@ -26,6 +29,7 @@ export default class OfflineLink extends ApolloLink {
     }
 
     this.storage = storage;
+    this.sequential = sequential;
     this.queue = new Map();
     this.delayedSync = debounce(this.sync, retryInterval);
   }
@@ -41,7 +45,7 @@ export default class OfflineLink extends ApolloLink {
     }
 
     return new Observable(observer => {
-      const attemptId = this.add({mutation: query, variables});
+      const attemptId = this.add({mutation: query, variables, optimisticResponse: context.optimisticResponse});
 
       const subscription = forward(operation).subscribe({
         next: result => {
@@ -146,17 +150,57 @@ export default class OfflineLink extends ApolloLink {
     // Update the status to be "in progress"
     this.updateStatus(true);
 
-    // Waits till all the mutations in the queue are retried, the successful ones are removed from the queue
-    const mutations = await Promise.all(Array.from(queue).map(([attemptId, attempt]) => {
-      return this.client.mutate(attempt)
-        .then(() => queue.delete(attemptId))
-        .catch(err => {
-          if (err.networkError.response) {
-            queue.delete(attemptId);
-          }
-        })
-      ;
-    }));
+    // Retry the mutations in the queue, the successful ones are removed from the queue
+    if (this.sequential) {
+      // Retry the mutations in the order in which they were originally executed
+      const attempts = Array.from(queue);
+
+      for (const [attemptId, attempt] of attempts) {
+        const success = await this.client.mutate({...attempt, optimisticResponse: undefined})
+          .then(() => {
+            // Mutation was successfully executed so we remove it from the queue
+            queue.delete(attemptId)
+
+            return true;
+          })
+          .catch(err => {
+            if (err.networkError.response) {
+              // There are GraphQL errors, which means the server processed the request so we can remove the mutation from the queue
+
+              queue.delete(attemptId);
+
+              return true;
+            } else {
+              // There was a network error so we have to retry the mutation
+
+              return false;
+            }
+          })
+        ;
+
+        if (!success) {
+          // The last mutation failed so we don't attempt any more
+          break;
+        }
+      }
+    } else {
+      // Retry mutations in parallel
+
+      await Promise.all(Array.from(queue).map(([attemptId, attempt]) => {
+        return this.client.mutate(attempt)
+          // Mutation was successfully executed so we remove it from the queue
+          .then(() => queue.delete(attemptId))
+
+          .catch(err => {
+            if (err.networkError.response) {
+              // There are GraphQL errors, which means the server processed the request so we can remove the mutation from the queue
+
+              queue.delete(attemptId);
+            }
+          })
+        ;
+      }));
+    }
 
     // Remaining mutations in the queue are persisted
     this.saveQueue();
@@ -165,8 +209,6 @@ export default class OfflineLink extends ApolloLink {
       // If there are any mutations left in the queue, we retry them at a later point in time
       this.delayedSync();
     }
-
-    return mutations;
   }
 
   /**
