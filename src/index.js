@@ -1,1 +1,1 @@
-export default, { syncStatusQuery } from "./OfflineLink";
+export { default, syncStatusQuery } from "./OfflineLink";

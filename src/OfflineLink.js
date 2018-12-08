@@ -20,8 +20,11 @@ export default class OfflineLink extends ApolloLink {
    * 
    * sequential
    * Indicates if the attempts should be retried in order. Defaults to false which retries all failed mutations in parallel.
+   * 
+   * retryOnServerError
+   * Indicates if mutations should be reattempted if there are server side errors, useful to retry mutations on session expiration. Defaults to false.
    */
-  constructor({ storage, retryInterval = 30000, sequential = false }) {
+  constructor({ storage, retryInterval = 30000, sequential = false, retryOnServerError = false }) {
     super();
 
     if (!storage) {
@@ -30,11 +33,12 @@ export default class OfflineLink extends ApolloLink {
 
     this.storage = storage;
     this.sequential = sequential;
+    this.retryOnServerError = retryOnServerError;
     this.queue = new Map();
     this.delayedSync = debounce(this.sync, retryInterval);
   }
 
-  request (operation, forward) {
+  request(operation, forward) {
     const me = this,
           context = operation.getContext(),
           { query, variables } = operation || {};
@@ -164,7 +168,7 @@ export default class OfflineLink extends ApolloLink {
             return true;
           })
           .catch(err => {
-            if (err.networkError.response) {
+            if (this.retryOnServerError === false && err.networkError.response) {
               // There are GraphQL errors, which means the server processed the request so we can remove the mutation from the queue
 
               queue.delete(attemptId);
@@ -192,7 +196,7 @@ export default class OfflineLink extends ApolloLink {
           .then(() => queue.delete(attemptId))
 
           .catch(err => {
-            if (err.networkError.response) {
+            if (this.retryOnServerError === false && err.networkError.response) {
               // There are GraphQL errors, which means the server processed the request so we can remove the mutation from the queue
 
               queue.delete(attemptId);
