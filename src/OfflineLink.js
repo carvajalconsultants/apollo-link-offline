@@ -36,6 +36,7 @@ export default class OfflineLink extends ApolloLink {
     this.retryOnServerError = retryOnServerError;
     this.queue = new Map();
     this.delayedSync = debounce(this.sync, retryInterval);
+    this.prefix = 'offlineLink';
   }
 
   request(operation, forward) {
@@ -88,19 +89,68 @@ export default class OfflineLink extends ApolloLink {
    * These are kept in a Map to preserve the order of the mutations in the queue.
    */
   getQueue() {
-      return this.storage.getItem("@offlineLink").then(stored => {
-        return new Map(JSON.parse(stored)) || new Map();
+    let filesArray, map;
+
+    return new Promise ((resolve, reject) => {
+
+      // Get all filenames
+      this.storage.getAllKeys().then(files => {
+
+        // From all files filter by the prefix
+        filesArray = files.filter(file => file.includes(this.prefix))
+        map = new Map();
+
+        filesArray.forEach((file, index) => {
+          // If there exists the '@offlineLink' file yet ->
+          if (file.includes('@')) {
+            this.storage.getItem("@offlineLink").then(stored => {
+              map = new Map(JSON.parse(stored))
+
+              // Saving new version files
+              map.forEach((value, key) => {
+                this.saveQueue(key,value)
+              })
+
+              // remove old version file
+              this.storage.removeItem('@offlineLink')
+
+              // return the queue
+              resolve(map)
+            }).catch(err => {
+              // Most likely happens the first time a mutation attempt is being persisted.
+              map = new Map();
+              resolve(map)
+            });
+          } else {
+            // Get file of name '<prefix><UUID>'
+            this.storage.getItem(file).then(stored => {
+
+              const attemptId = file.split(this.prefix)[1];
+              map.set(attemptId.replace(/:/gi,'-'), JSON.parse(stored));
+
+              // We return the map
+              if (index === filesArray.length-1) {
+                resolve (map);
+              }
+
+            })
+          }
+        })
+
       }).catch(err => {
-        // Most likely happens the first time a mutation attempt is being persisted.
-        return new Map();
-      });
+        reject()
+      })
+    })
   }
 
   /**
    * Persist the queue so mutations can be retried at a later point in time.
    */
-  saveQueue() {
-    this.storage.setItem("@offlineLink", JSON.stringify([...this.queue]));
+  saveQueue(attemptId, item) {
+
+    if (attemptId && item) {
+      this.storage.setItem(this.prefix + attemptId, JSON.stringify(item))
+    }
 
     this.updateStatus(false);
   }
@@ -125,7 +175,7 @@ export default class OfflineLink extends ApolloLink {
 
     this.queue.set(attemptId, item);
 
-    this.saveQueue();
+    this.saveQueue(attemptId, item);
 
     return attemptId;
   }
@@ -135,6 +185,8 @@ export default class OfflineLink extends ApolloLink {
    */
   remove(attemptId) {
     this.queue.delete(attemptId);
+
+    this.storage.removeItem(this.prefix + attemptId)
 
     this.saveQueue();
   }
@@ -163,15 +215,15 @@ export default class OfflineLink extends ApolloLink {
         const success = await this.client.mutate({...attempt, optimisticResponse: undefined})
           .then(() => {
             // Mutation was successfully executed so we remove it from the queue
-            queue.delete(attemptId)
 
+            this.remove(attemptId)
             return true;
           })
           .catch(err => {
             if (this.retryOnServerError === false && err.networkError.response) {
               // There are GraphQL errors, which means the server processed the request so we can remove the mutation from the queue
 
-              queue.delete(attemptId);
+              this.remove(attemptId)
 
               return true;
             } else {
@@ -193,13 +245,15 @@ export default class OfflineLink extends ApolloLink {
       await Promise.all(Array.from(queue).map(([attemptId, attempt]) => {
         return this.client.mutate(attempt)
           // Mutation was successfully executed so we remove it from the queue
-          .then(() => queue.delete(attemptId))
+          .then(() => {
+            this.remove(attemptId)
+          })
 
           .catch(err => {
             if (this.retryOnServerError === false && err.networkError.response) {
               // There are GraphQL errors, which means the server processed the request so we can remove the mutation from the queue
 
-              queue.delete(attemptId);
+              this.remove(attemptId)
             }
           })
         ;
