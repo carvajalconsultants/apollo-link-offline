@@ -85,72 +85,89 @@ export default class OfflineLink extends ApolloLink {
   }
 
   /**
+   * If there exists the '@offlineLink' old file, migrate it into new multiple files
+   */
+  oldFile() {
+    let map;
+    return this.storage.getItem("@offlineLink")
+      .then(stored => {
+
+        if (stored) {
+          map = new Map(JSON.parse(stored));
+
+          // Saving new version files
+          map.forEach((value, key) => {
+            this.saveQueue(key, value);
+          });
+
+          // remove old version file
+          this.storage.removeItem("@offlineLink");
+
+          // return the queue
+          return map;
+        } else {
+          return new Map();
+        }
+      })
+      .catch(err => {
+        // Most likely happens the first time a mutation attempt is being persisted.
+        return new Map();
+      });
+  }
+
+  /**
    * Obtains the queue of mutations that must be sent to the server.
    * These are kept in a Map to preserve the order of the mutations in the queue.
    */
   getQueue() {
-    let filesArray, map;
+    let storedAttemptIds = [],
+      map;
 
-    return new Promise ((resolve, reject) => {
-
-      // Get all filenames
-      this.storage.getAllKeys().then(files => {
-
-        // From all files filter by the prefix
-        filesArray = files.filter(file => file.includes(this.prefix))
-        map = new Map();
-
-        filesArray.forEach((file, index) => {
-          // If there exists the '@offlineLink' file yet ->
-          if (file.includes('@')) {
-            this.storage.getItem("@offlineLink").then(stored => {
-              map = new Map(JSON.parse(stored))
-
-              // Saving new version files
-              map.forEach((value, key) => {
-                this.saveQueue(key,value)
-              })
-
-              // remove old version file
-              this.storage.removeItem('@offlineLink')
-
-              // return the queue
-              resolve(map)
-            }).catch(err => {
-              // Most likely happens the first time a mutation attempt is being persisted.
-              map = new Map();
-              resolve(map)
-            });
-          } else {
-            // Get file of name '<prefix><UUID>'
-            this.storage.getItem(file).then(stored => {
-
-              const attemptId = file.split(this.prefix)[1];
-              map.set(attemptId.replace(/:/gi,'-'), JSON.parse(stored));
-
-              // We return the map
-              if (index === filesArray.length-1) {
-                resolve (map);
+    return new Promise((resolve, reject) => {
+      this.oldFile().then(mapOld => {
+        // Process the migration first, otherwise read multiple files
+        if (mapOld.size > 0) {
+          resolve(mapOld);
+        } else {
+          // Get all attempt Ids
+          this.storage.getItem(this.prefix + "AttemptIds")
+            .then(storedIds => {
+              if (storedIds) {
+                storedAttemptIds = storedIds.split(",");
+                map = new Map();
               }
 
-            })
-          }
-        })
+              storedAttemptIds.forEach((storedId, index) => {
+                // Get file of name '<prefix><UUID>'
+                this.storage.getItem(this.prefix + storedId).then(stored => {
+                  map.set(storedId, JSON.parse(stored));
 
-      }).catch(err => {
-        reject()
-      })
-    })
+                  // We return the map
+                  if (index === storedAttemptIds.length - 1) {
+                    resolve(map);
+                  }
+                });
+              });
+            })
+            .catch(err => {
+              // Most likely happens the first time a mutation attempt is being persisted.
+              resolve(new Map());
+            });
+        }
+      });
+    });
   }
 
   /**
    * Persist the queue so mutations can be retried at a later point in time.
    */
   saveQueue(attemptId, item) {
-
     if (attemptId && item) {
-      this.storage.setItem(this.prefix + attemptId, JSON.stringify(item))
+      this.storage.setItem(this.prefix + attemptId, JSON.stringify(item));
     }
+
+    // Saving Ids file
+    this.storage.setItem(this.prefix + "AttemptIds", [...this.queue.keys()].join());
 
     this.updateStatus(false);
   }
@@ -209,10 +226,12 @@ export default class OfflineLink extends ApolloLink {
     // Retry the mutations in the queue, the successful ones are removed from the queue
     if (this.sequential) {
       // Retry the mutations in the order in which they were originally executed
+
       const attempts = Array.from(queue);
 
       for (const [attemptId, attempt] of attempts) {
-        const success = await this.client.mutate({...attempt, optimisticResponse: undefined})
+        const success = await this.client
+          .mutate({...attempt, optimisticResponse: undefined})
           .then(() => {
             // Mutation was successfully executed so we remove it from the queue
 
