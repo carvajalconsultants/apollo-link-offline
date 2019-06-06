@@ -87,7 +87,7 @@ export default class OfflineLink extends ApolloLink {
   /**
    * If there exists the '@offlineLink' old file, migrate it into new multiple files
    */
-  oldFile() {
+  migrate() {
     let map;
     return this.storage.getItem("@offlineLink")
       .then(stored => {
@@ -99,6 +99,7 @@ export default class OfflineLink extends ApolloLink {
           map.forEach((value, key) => {
             this.saveQueue(key, value);
           });
+          this.storage.setItem(this.prefix + "AttemptIds", [...map.keys()].join());
 
           // remove old version file
           this.storage.removeItem("@offlineLink");
@@ -119,41 +120,37 @@ export default class OfflineLink extends ApolloLink {
    * Obtains the queue of mutations that must be sent to the server.
    * These are kept in a Map to preserve the order of the mutations in the queue.
    */
-  getQueue() {
+  async getQueue() {
     let storedAttemptIds = [],
       map;
 
+    await this.migrate();
+
     return new Promise((resolve, reject) => {
-      this.oldFile().then(mapOld => {
-        // Process the migration first, otherwise read multiple files
-        if (mapOld.size > 0) {
-          resolve(mapOld);
-        } else {
-          // Get all attempt Ids
-          this.storage.getItem(this.prefix + "AttemptIds")
-            .then(storedIds => {
-              if (storedIds) {
-                storedAttemptIds = storedIds.split(",");
-                map = new Map();
+      // Get all attempt Ids
+      this.storage.getItem(this.prefix + "AttemptIds").then(storedIds => {
+        map = new Map();
+
+        if (storedIds) {
+          storedAttemptIds.forEach((storedId, index) => {
+
+            // Get file of name '<prefix><UUID>'
+            this.storage.getItem(this.prefix + storedId).then(stored => {
+              map.set(storedId, JSON.parse(stored));
+
+              // We return the map
+              if (index === storedAttemptIds.length - 1) {
+                resolve(map);
               }
-
-              storedAttemptIds.forEach((storedId, index) => {
-                // Get file of name '<prefix><UUID>'
-                this.storage.getItem(this.prefix + storedId).then(stored => {
-                  map.set(storedId, JSON.parse(stored));
-
-                  // We return the map
-                  if (index === storedAttemptIds.length - 1) {
-                    resolve(map);
-                  }
-                });
-              });
-            })
-            .catch(err => {
-              // Most likely happens the first time a mutation attempt is being persisted.
-              resolve(new Map());
             });
+          });
+        } else {
+          resolve(map);
         }
+      })
+      .catch(err => {
+        // Most likely happens the first time a mutation attempt is being persisted.
+        resolve(new Map());
       });
     });
   }
