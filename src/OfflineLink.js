@@ -97,22 +97,18 @@ export default class OfflineLink extends ApolloLink {
 
           // Saving new version files
           map.forEach((value, key) => {
-            this.saveQueue(key, value);
+            this.storage.setItem(this.prefix + key, JSON.stringify(value));
           });
+
+          // Saving new mutation Ids
           this.storage.setItem(this.prefix + "AttemptIds", [...map.keys()].join());
 
           // remove old version file
           this.storage.removeItem("@offlineLink");
-
-          // return the queue
-          return map;
-        } else {
-          return new Map();
         }
       })
       .catch(err => {
         // Most likely happens the first time a mutation attempt is being persisted.
-        return new Map();
       });
   }
 
@@ -132,6 +128,8 @@ export default class OfflineLink extends ApolloLink {
         map = new Map();
 
         if (storedIds) {
+          storedAttemptIds = storedIds.split(",");
+
           storedAttemptIds.forEach((storedId, index) => {
 
             // Get file of name '<prefix><UUID>'
