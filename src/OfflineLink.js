@@ -36,6 +36,7 @@ export default class OfflineLink extends ApolloLink {
     this.retryOnServerError = retryOnServerError;
     this.queue = new Map();
     this.delayedSync = debounce(this.sync, retryInterval);
+    this.prefix = 'offlineLink';
   }
 
   request(operation, forward) {
@@ -84,23 +85,84 @@ export default class OfflineLink extends ApolloLink {
   }
 
   /**
+   * If there exists the '@offlineLink' old file, migrate it into new multiple files
+   */
+  migrate() {
+    let map;
+    return this.storage.getItem("@offlineLink")
+      .then(stored => {
+
+        if (stored) {
+          map = new Map(JSON.parse(stored));
+
+          // Saving new version files
+          map.forEach((value, key) => {
+            this.storage.setItem(this.prefix + key, JSON.stringify(value));
+          });
+
+          // Saving new mutation Ids
+          this.storage.setItem(this.prefix + "AttemptIds", [...map.keys()].join());
+
+          // remove old version file
+          this.storage.removeItem("@offlineLink");
+        }
+      })
+      .catch(err => {
+        // Most likely happens the first time a mutation attempt is being persisted.
+      });
+  }
+
+  /**
    * Obtains the queue of mutations that must be sent to the server.
    * These are kept in a Map to preserve the order of the mutations in the queue.
    */
-  getQueue() {
-      return this.storage.getItem("@offlineLink").then(stored => {
-        return new Map(JSON.parse(stored)) || new Map();
-      }).catch(err => {
+  async getQueue() {
+    let storedAttemptIds = [],
+      map;
+
+    await this.migrate();
+
+    return new Promise((resolve, reject) => {
+      // Get all attempt Ids
+      this.storage.getItem(this.prefix + "AttemptIds").then(storedIds => {
+        map = new Map();
+
+        if (storedIds) {
+          storedAttemptIds = storedIds.split(",");
+
+          storedAttemptIds.forEach((storedId, index) => {
+
+            // Get file of name '<prefix><UUID>'
+            this.storage.getItem(this.prefix + storedId).then(stored => {
+              map.set(storedId, JSON.parse(stored));
+
+              // We return the map
+              if (index === storedAttemptIds.length - 1) {
+                resolve(map);
+              }
+            });
+          });
+        } else {
+          resolve(map);
+        }
+      })
+      .catch(err => {
         // Most likely happens the first time a mutation attempt is being persisted.
-        return new Map();
+        resolve(new Map());
       });
+    });
   }
 
   /**
    * Persist the queue so mutations can be retried at a later point in time.
    */
-  saveQueue() {
-    this.storage.setItem("@offlineLink", JSON.stringify([...this.queue]));
+  saveQueue(attemptId, item) {
+    if (attemptId && item) {
+      this.storage.setItem(this.prefix + attemptId, JSON.stringify(item));
+    }
+
+    // Saving Ids file
+    this.storage.setItem(this.prefix + "AttemptIds", [...this.queue.keys()].join());
 
     this.updateStatus(false);
   }
@@ -125,7 +187,7 @@ export default class OfflineLink extends ApolloLink {
 
     this.queue.set(attemptId, item);
 
-    this.saveQueue();
+    this.saveQueue(attemptId, item);
 
     return attemptId;
   }
@@ -135,6 +197,8 @@ export default class OfflineLink extends ApolloLink {
    */
   remove(attemptId) {
     this.queue.delete(attemptId);
+
+    this.storage.removeItem(this.prefix + attemptId)
 
     this.saveQueue();
   }
@@ -157,21 +221,23 @@ export default class OfflineLink extends ApolloLink {
     // Retry the mutations in the queue, the successful ones are removed from the queue
     if (this.sequential) {
       // Retry the mutations in the order in which they were originally executed
+
       const attempts = Array.from(queue);
 
       for (const [attemptId, attempt] of attempts) {
-        const success = await this.client.mutate({...attempt, optimisticResponse: undefined})
+        const success = await this.client
+          .mutate({...attempt, optimisticResponse: undefined})
           .then(() => {
             // Mutation was successfully executed so we remove it from the queue
-            queue.delete(attemptId)
 
+            this.remove(attemptId)
             return true;
           })
           .catch(err => {
             if (this.retryOnServerError === false && err.networkError.response) {
               // There are GraphQL errors, which means the server processed the request so we can remove the mutation from the queue
 
-              queue.delete(attemptId);
+              this.remove(attemptId)
 
               return true;
             } else {
@@ -193,13 +259,15 @@ export default class OfflineLink extends ApolloLink {
       await Promise.all(Array.from(queue).map(([attemptId, attempt]) => {
         return this.client.mutate(attempt)
           // Mutation was successfully executed so we remove it from the queue
-          .then(() => queue.delete(attemptId))
+          .then(() => {
+            this.remove(attemptId)
+          })
 
           .catch(err => {
             if (this.retryOnServerError === false && err.networkError.response) {
               // There are GraphQL errors, which means the server processed the request so we can remove the mutation from the queue
 
-              queue.delete(attemptId);
+              this.remove(attemptId)
             }
           })
         ;
