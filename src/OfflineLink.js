@@ -13,7 +13,7 @@ const syncStatusQuery = gql`
 export default class OfflineLink extends ApolloLink {
   /**
    * storage
-   * Provider that will persist the mutation queue. This can be AsyncStorage, window.localStorage, et.
+   * Provider that will persist the mutation queue. This can be any AsyncStorage compatible storage instance.
    * 
    * retryInterval
    * Milliseconds between attempts to retry failed mutations. Defaults to 30,000 milliseconds.
@@ -28,7 +28,7 @@ export default class OfflineLink extends ApolloLink {
     super();
 
     if (!storage) {
-      throw new Error("Storage is required, it can be window.localStorage, AsyncStorage, etc.");
+      throw new Error("Storage is required, it can be an AsyncStorage compatible storage instance.");
     }
 
     this.storage = storage;
