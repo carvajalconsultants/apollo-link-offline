@@ -4,6 +4,7 @@
   "description": "An Apollo Link to queue mutations when offline or network errors exist.",
   "repository": "github:carvajalconsultants/apollo-link-offline",
   "main": "./src/index.js",
+  "types": "index.d.ts",
   "author": "Miguel Carvajal <omar@carvajalonline.com>",
   "license": "MIT",
   "private": false,
