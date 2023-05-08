@@ -9,7 +9,7 @@ Reason for this assumption is twofold:
 2. In cases where the the network is NOT offline but really slow (think 2G in a third world country) and the request doesn't reach the server anyway,
    our queue retries until the server responds with success.
 
-Tested with Apollo version 3.0.0-beta.23
+Tested with Apollo version 3.7.14
 
 ### Setup
 

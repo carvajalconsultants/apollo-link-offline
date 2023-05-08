@@ -1,7 +1,6 @@
-import { ApolloLink, Observable } from "apollo-link";
+import { ApolloLink, Observable, gql } from "@apollo/client";
 import debounce from "lodash/debounce";
-import uuidv4 from "uuid/v4";
-import gql from "graphql-tag";
+import { v4 as uuidv4 } from 'uuid';
 
 const syncStatusQuery = gql`
   query syncStatus {
@@ -41,8 +40,8 @@ export default class OfflineLink extends ApolloLink {
 
   request(operation, forward) {
     const me = this,
-          context = operation.getContext(),
-          { query, variables } = operation || {};
+      context = operation.getContext(),
+      { query, variables } = operation || {};
 
     if (!context.optimisticResponse) {
       // If the mutation does not have an optimistic response then we don't defer it
@@ -50,7 +49,7 @@ export default class OfflineLink extends ApolloLink {
     }
 
     return new Observable(observer => {
-      const attemptId = this.add({mutation: query, variables, optimisticResponse: context.optimisticResponse});
+      const attemptId = this.add({ mutation: query, variables, optimisticResponse: context.optimisticResponse });
 
       const subscription = forward(operation).subscribe({
         next: result => {
@@ -146,10 +145,10 @@ export default class OfflineLink extends ApolloLink {
           resolve(map);
         }
       })
-      .catch(err => {
-        // Most likely happens the first time a mutation attempt is being persisted.
-        resolve(new Map());
-      });
+        .catch(err => {
+          // Most likely happens the first time a mutation attempt is being persisted.
+          resolve(new Map());
+        });
     });
   }
 
@@ -171,11 +170,13 @@ export default class OfflineLink extends ApolloLink {
    * Updates a SyncStatus object in the Apollo Cache so that the queue status can be obtained and dynamically updated.
    */
   updateStatus(inflight) {
-    this.client.writeQuery({query: syncStatusQuery, data: {
-      __typename: "SyncStatus",
-      mutations: this.queue.size,
-      inflight
-    }});
+    this.client.writeQuery({
+      query: syncStatusQuery, data: {
+        __typename: "SyncStatus",
+        mutations: this.queue.size,
+        inflight
+      }
+    });
   }
 
   /**
@@ -226,7 +227,7 @@ export default class OfflineLink extends ApolloLink {
 
       for (const [attemptId, attempt] of attempts) {
         const success = await this.client
-          .mutate({...attempt, optimisticResponse: undefined})
+          .mutate({ ...attempt, optimisticResponse: undefined })
           .then(() => {
             // Mutation was successfully executed so we remove it from the queue
 
@@ -246,7 +247,7 @@ export default class OfflineLink extends ApolloLink {
               return false;
             }
           })
-        ;
+          ;
 
         if (!success) {
           // The last mutation failed so we don't attempt any more
@@ -270,7 +271,7 @@ export default class OfflineLink extends ApolloLink {
               this.remove(attemptId)
             }
           })
-        ;
+          ;
       }));
     }
 
