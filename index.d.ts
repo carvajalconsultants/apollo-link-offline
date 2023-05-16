@@ -1,7 +1,6 @@
 declare module 'apollo-link-offline' {
+  import type { ApolloLink, NextLink, Operation, gql } from '@apollo/client';
   import type { AsyncStorageStatic } from '@react-native-community/async-storage';
-  import type gql from 'graphql-tag';
-  import type { ApolloLink, Operation, NextLink } from '@apollo/client/link/core';
 
   type Options = Partial<{
     storage: AsyncStorageStatic;
@@ -17,9 +16,9 @@ declare module 'apollo-link-offline' {
 
     request(operation: Operation, forward: NextLink): any;
 
-    async migrate(): Promise<void>;
+    migrate(): Promise<void>;
 
-    async getQueue(): Promise<Map<string, Record<string, any>>>;
+    getQueue(): Promise<Map<string, Record<string, any>>>;
 
     saveQueue(attemptId: string, item: Record<string, any>): void;
 
@@ -29,8 +28,8 @@ declare module 'apollo-link-offline' {
 
     remove(itemId: string): void;
 
-    async sync(): Promise<void>;
+    sync(): Promise<void>;
 
-    async setup(client: any): Promise<void>;
+    setup(client: any): Promise<void>;
   }
 }
