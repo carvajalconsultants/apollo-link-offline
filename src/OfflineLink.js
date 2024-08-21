@@ -49,7 +49,12 @@ export default class OfflineLink extends ApolloLink {
     }
 
     return new Observable(observer => {
-      const attemptId = this.add({ mutation: query, variables, optimisticResponse: context.optimisticResponse });
+      const attemptId = this.add({
+        mutation: query, variables, optimisticResponse:
+            typeof context?.optimisticResponse === 'function'
+                ? context.optimisticResponse(variables)
+                : context.optimisticResponse,
+      });
 
       const subscription = forward(operation).subscribe({
         next: result => {
@@ -65,7 +70,9 @@ export default class OfflineLink extends ApolloLink {
 
           // Resolve the mutation with the optimistic response so the UI can be updated
           observer.next({
-            data: context.optimisticResponse,
+            data: typeof context.optimisticResponse === 'function'
+                ? context.optimisticResponse(variables)
+                : context.optimisticResponse,
             dataPresent: true,
             errors: []
           });
